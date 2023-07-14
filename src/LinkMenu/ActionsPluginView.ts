@@ -105,18 +105,6 @@ export class ActionsView {
     this.blurHandler({ event });
   };
 
-  getElementScale(element: HTMLElement): { scaleX: number; scaleY: number } {
-    const rect = element.getBoundingClientRect();
-    // Adjust for elements with style "transform: scale()"
-    const scaleX = rect.width / element.offsetWidth || 1;
-    const scaleY = rect.height / element.offsetHeight || 1;
-
-    return {
-      scaleX,
-      scaleY,
-    };
-  }
-
   createTooltip() {
     const { element: editorElement } = this.editor.options;
     const editorIsAttached = !!editorElement.parentElement;
@@ -126,13 +114,13 @@ export class ActionsView {
     }
 
     this.tippy = tippy(editorElement, {
+      duration: 0,
       getReferenceClientRect: null,
       content: this.element,
       interactive: true,
       trigger: 'manual',
       placement: 'top',
       hideOnClick: 'toggle',
-      duration: 100,
       arrow: roundArrow,
       theme: 'light',
       ...this.tippyOptions,
@@ -140,41 +128,49 @@ export class ActionsView {
 
     // maybe we have to hide tippy on its own blur event as well
     if (this.tippy.popper.firstChild) {
-      (this.tippy.popper.firstChild as HTMLElement).addEventListener(
-        'blur',
-        this.tippyBlurHandler
-      );
+      (this.tippy.popper.firstChild as HTMLElement).addEventListener('blur', this.tippyBlurHandler);
     }
   }
 
   update(view: EditorView, oldState?: EditorState) {
     const { state } = view;
-    const hasValidSelection =
-      state.selection.$from.pos !== state.selection.$to.pos;
+    const hasValidSelection = state.selection.$from.pos !== state.selection.$to.pos;
 
     if (this.updateDelay > 0 && hasValidSelection) {
       this.handleDebouncedUpdate(view, oldState);
       return;
     }
 
-    this.updateHandler(view, oldState);
+    const selectionChanged = !oldState?.selection.eq(view.state.selection);
+    const docChanged = !oldState?.doc.eq(view.state.doc);
+
+    this.updateHandler(view, selectionChanged, docChanged, oldState);
   }
 
   handleDebouncedUpdate = (view: EditorView, oldState?: EditorState) => {
+    const selectionChanged = !oldState?.selection.eq(view.state.selection);
+    const docChanged = !oldState?.doc.eq(view.state.doc);
+
+    if (!selectionChanged && !docChanged) {
+      return;
+    }
+
     if (this.updateDebounceTimer) {
       clearTimeout(this.updateDebounceTimer);
     }
 
     this.updateDebounceTimer = window.setTimeout(() => {
-      this.updateHandler(view, oldState);
+      this.updateHandler(view, selectionChanged, docChanged, oldState);
     }, this.updateDelay);
-  };
+  }
 
-  updateHandler = (view: EditorView, oldState?: EditorState) => {
+  updateHandler = (view: EditorView, selectionChanged: boolean, docChanged: boolean, oldState?: EditorState) => {
     const { state, composing } = view;
     const { selection } = state;
 
-    if (composing) {
+    const isSame = !selectionChanged && !docChanged;
+
+    if (composing || isSame) {
       return;
     }
 
@@ -182,8 +178,8 @@ export class ActionsView {
 
     // support for CellSelections
     const { ranges } = selection;
-    const from = Math.min(...ranges.map((range) => range.$from.pos));
-    const to = Math.max(...ranges.map((range) => range.$to.pos));
+    const from = Math.min(...ranges.map(range => range.$from.pos));
+    const to = Math.max(...ranges.map(range => range.$to.pos));
 
     const shouldShow = this.shouldShow?.({
       editor: this.editor,
@@ -202,54 +198,28 @@ export class ActionsView {
 
     this.tippy?.setProps({
       getReferenceClientRect:
-        this.tippyOptions?.getReferenceClientRect ||
-        (() => {
-          let clientRect: DOMRect | undefined;
+        this.tippyOptions?.getReferenceClientRect
+        || (() => {
           if (isNodeSelection(state.selection)) {
             let node = view.nodeDOM(from) as HTMLElement;
 
-            const nodeViewWrapper = node.dataset.nodeViewWrapper
-              ? node
-              : node.querySelector('[data-node-view-wrapper]');
+            const nodeViewWrapper = node.dataset.nodeViewWrapper ? node : node.querySelector('[data-node-view-wrapper]');
 
             if (nodeViewWrapper) {
               node = nodeViewWrapper.firstChild as HTMLElement;
             }
 
             if (node) {
-              clientRect = node.getBoundingClientRect();
+              return node.getBoundingClientRect();
             }
           }
 
-          if (!clientRect) {
-            clientRect = posToDOMRect(view, from, to);
-          }
-
-          const documentScale = this.getElementScale(this.element);
-          const x = clientRect.left / documentScale.scaleX;
-          const y = clientRect.top / documentScale.scaleY;
-          const width = clientRect.width / documentScale.scaleX;
-          const height = clientRect.height / documentScale.scaleY;
-          const result = {
-            top: y,
-            left: x,
-            right: x + width,
-            bottom: y + height,
-            width,
-            height,
-            x,
-            y,
-          };
-
-          return {
-            ...result,
-            toJSON: () => result,
-          };
+          return posToDOMRect(view, from, to);
         }),
-    });
+    })
 
     this.show();
-  };
+  }
 
   show() {
     this.tippy?.show();
@@ -260,20 +230,16 @@ export class ActionsView {
   }
 
   destroy() {
-    // Make sure event handlers are removed before destroying tippy, otherwise calls might be made to a destroyed instance
     if (this.tippy?.popper.firstChild) {
       (this.tippy.popper.firstChild as HTMLElement).removeEventListener(
         'blur',
-        this.tippyBlurHandler
+        this.tippyBlurHandler,
       );
     }
-    this.element.removeEventListener('mousedown', this.mousedownHandler, {
-      capture: true,
-    });
+    this.tippy?.destroy();
+    this.element.removeEventListener('mousedown', this.mousedownHandler, { capture: true });
     this.view.dom.removeEventListener('dragstart', this.dragstartHandler);
     this.editor.off('focus', this.focusHandler);
     this.editor.off('blur', this.blurHandler);
-
-    this.tippy?.destroy();
   }
 }
