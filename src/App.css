@@ -1,0 +1,20 @@
+#root {
+  height: 100%;
+  width: 100%;
+  padding: 2rem;
+}
+
+.editor-container {
+  height: auto;
+  min-height: 200px;
+  padding: 24px;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 13%);
+}
+
+.ProseMirror:focus {
+  outline: none;
+}
+
+.ProseMirror {
+  white-space: normal !important;
+}
